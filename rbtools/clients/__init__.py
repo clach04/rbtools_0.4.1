@@ -140,6 +140,29 @@ def load_scmclients(options):
         SVNClient(options=options),
     ]
 
+# Actian version - less clients
+# re-define load_scmclients()/SCMCLIENTS
+# this makes merging changes easier (than customizing SCMCLIENTS) :-)
+def load_scmclients(options):
+    global SCMCLIENTS
+
+    from rbtools.clients.svn import SVNClient
+    from rbtools.clients.piccolo import PiccoloClient
+
+    SCMCLIENTS = [
+        PiccoloClient(options=options),
+    ]
+    tmp_platform = sys.platform
+    if 'java' in tmp_platform.lower():
+        jv_props = sys.getBaseProperties()
+        #jv_props = dict(jv_props)
+        tmp_platform = jv_props['os.name']
+    if tmp_platform != 'OpenVMS':
+        # i.e. platform supports subprocess and/or fork
+        SCMCLIENTS.insert(0, SVNClient(options=options))
+    del tmp_platform
+####################################################################
+
 
 def scan_usable_client(options):
     from rbtools.clients.perforce import PerforceClient
