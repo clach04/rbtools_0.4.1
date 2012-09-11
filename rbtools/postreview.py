@@ -576,6 +576,51 @@ class ReviewBoardServer(object):
                 'status': 'pending',
             })
 
+    def close_submitted(self, review_request):
+        """
+        Close a review request as submitted (with no reason).
+        
+        """
+        debug("Closing as submitted")
+
+        if self.deprecated_api:
+            raise NotImplementedError()
+        else:
+            self.api_put(review_request['links']['self']['href'], {
+                'status': 'submitted',
+            })
+
+    def discard(self, review_request):
+        """
+        Discards a review request (with no reason).
+        TODO unused
+        """
+        debug("Discarding")
+
+        if self.deprecated_api:
+            raise NotImplementedError()
+        else:
+            self.api_put(review_request['links']['self']['href'], {
+                'status': 'discarded',
+            })
+    
+    def add_comment(self, review_request, comment_text):
+        """
+        Adds a free-standing comment (i.e. review)
+        """
+        debug("Commenting on review")
+
+        if self.deprecated_api:
+            raise NotImplementedError()
+        else:
+            tmp_url = review_request['links']['reviews']['href']
+            self.api_post(tmp_url, {
+                'body_top': comment_text,
+                'public': 1,
+                #'body_bottom': '',
+                #'ship_it': 0,
+            })
+
     def publish(self, review_request):
         """
         Publishes a review request.
@@ -840,6 +885,36 @@ def debug(s):
     """
     if options and options.debug:
         print ">>> %s" % s
+
+def comment_or_close(server):
+    """
+    Add a comment and/or close as submitted
+    """
+    try:
+        review_request = server.get_review_request(options.rid)
+    except APIError, e:
+        die("Error getting review request %s: %s" % (options.rid, e))
+
+    try:
+        if options.comment:
+            server.add_comment(review_request, options.comment)
+
+        if options.close_submitted:
+            server.close_submitted(review_request)
+    except APIError, e:
+        die("Error updating review request %s: %s" % (options.rid, e))
+
+    request_url = 'r/' + str(review_request['id'])
+    review_url = urljoin(server.url, request_url)
+
+    if not review_url.startswith('http'):
+        review_url = 'http://%s' % review_url
+
+    print "Review request #%s updated." % (review_request['id'],)
+    print
+    print review_url
+
+    return review_url
 
 
 def tempt_fate(server, tool, changenum, diff_content=None,
@@ -1137,6 +1212,18 @@ def parse_options(args):
                       default=get_config_value(configs, 'HTTP_PASSWORD'),
                       metavar='PASSWORD',
                       help='password for HTTP Basic authentication')
+    
+    # potentially different from upstream
+    parser.add_option("--add-comment",
+                      dest="comment", default=None,
+                      help="add a free-standing comment ")
+    parser.add_option("--add-comment-file",
+                      dest="comment_file", default=None,
+                      help="file containing test of a free-standing comment ")
+    parser.add_option("--close-submitted",
+                      dest="close_submitted",action="store_true",default=False,
+                      help="close review as submitted")
+
 
     (globals()["options"], args) = parser.parse_args(args)
 
@@ -1236,12 +1323,30 @@ def main():
     if not server.check_api_version():
         die("Unable to log in with the supplied username and password.")
 
+    if options.close_submitted and (options.description or options.description_file\
+         or options.publish or options.output_diff_only or options.diff_only \
+         or options.target_groups or options.target_people or options.summary \
+         or options.guess_summary or options.guess_description or options.testing_done \
+         or options.testing_file or options.branch or options.bugs_closed \
+         or options.revision_range or options.submit_as \
+         or options.diff_filename ):
+        sys.stderr.write("The --close-submitted option is only valid when not "
+                         "changing other fields in the Review Request.\n")
+        sys.exit(1)
+
+    if options.close_submitted and options.rid is None:
+        sys.stderr.write("The --close-submitted option is only valid for "
+                         "existing Review Requests.\n")
+        sys.exit(1)
+
     if repository_info.supports_changesets:
         changenum = tool.get_changenum(args)
     else:
         changenum = None
 
-    if options.revision_range:
+    if options.comment or options.close_submitted:
+        diff, parent_diff = None, None
+    elif options.revision_range:
         diff, parent_diff = tool.diff_between_revisions(options.revision_range, args,
                                                         repository_info)
     elif options.svn_changelist:
@@ -1261,8 +1366,11 @@ def main():
     else:
         diff, parent_diff = tool.diff(args)
 
-    if len(diff) == 0:
-        die("There don't seem to be any diffs!")
+    # If using flags that do not require diffs (e.g. post a comment, set closed:submitted/discarded)
+    # Diff may well be none
+    if not (options.comment or options.close_submitted):
+        if len(diff) == 0:
+            die("There don't seem to be any diffs!")
 
     if (isinstance(tool, PerforceClient) or
         isinstance(tool, PlasticClient)) and changenum is not None:
@@ -1284,9 +1392,12 @@ def main():
     # Let's begin.
     server.login()
 
-    review_url = tempt_fate(server, tool, changenum, diff_content=diff,
-                            parent_diff_content=parent_diff,
-                            submit_as=options.submit_as)
+    if options.comment or options.close_submitted:
+        review_url = comment_or_close(server)
+    else:
+        review_url = tempt_fate(server, tool, changenum, diff_content=diff,
+                                parent_diff_content=parent_diff,
+                                submit_as=options.submit_as)
 
     # Load the review up in the browser if requested to:
     if options.open_browser:
