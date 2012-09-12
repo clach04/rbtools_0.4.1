@@ -576,7 +576,7 @@ class ReviewBoardServer(object):
                 'status': 'pending',
             })
 
-    def close_submitted(self, review_request):
+    def close_submitted(self, review_request, comment_text=None):
         """
         Close a review request as submitted (with no reason).
         
@@ -586,9 +586,12 @@ class ReviewBoardServer(object):
         if self.deprecated_api:
             raise NotImplementedError()
         else:
-            self.api_put(review_request['links']['self']['href'], {
+            payload = {
                 'status': 'submitted',
-            })
+            }
+            if comment_text:
+                payload['description'] = comment_text
+            self.api_put(review_request['links']['self']['href'], payload)
 
     def discard(self, review_request):
         """
@@ -900,7 +903,7 @@ def comment_or_close(server):
             server.add_comment(review_request, options.comment)
 
         if options.close_submitted:
-            server.close_submitted(review_request)
+            server.close_submitted(review_request, options.comment)
     except APIError, e:
         die("Error updating review request %s: %s" % (options.rid, e))
 
